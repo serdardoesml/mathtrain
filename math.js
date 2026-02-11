@@ -46,14 +46,29 @@
   }
   // Ensure 5 unique choices including the correct answer
   function finalizeChoices(candidates, correct, need=5){
-    const set = new Set();
-    if (correct!=null) set.add(String(correct));
-    (candidates||[]).forEach(x=>{ if (x!=null){ const s=String(x); if(!set.has(s)) set.add(s); } });
+    const correctStr = String(correct);
+    const unique = [];
+    const seen = new Set([correctStr]);
+    (candidates||[]).forEach(x=>{
+      if (x==null) return;
+      const s = String(x);
+      if (!seen.has(s)){
+        seen.add(s);
+        unique.push(s);
+      }
+    });
     const fillers = ['0','1','2','3','4','-1','\\frac{1}{2}','\\frac{2}{3}','e'];
-    for (const f of fillers){ if (set.size>=need) break; if (!set.has(f)) set.add(f); }
-    const arr = shuffle(Array.from(set));
-    const choices = arr.slice(0, need);
-    return { choices, correctIndex: choices.indexOf(String(correct)) };
+    for (const f of fillers){
+      if (unique.length >= need-1) break;
+      if (!seen.has(f)){
+        seen.add(f);
+        unique.push(f);
+      }
+    }
+    const distractors = shuffle(unique).slice(0, Math.max(0, need-1));
+    const insertAt = rng(0, distractors.length);
+    const choices = distractors.slice(0, insertAt).concat([correctStr], distractors.slice(insertAt));
+    return { choices, correctIndex: insertAt };
   }
   const fact = (n)=>{ let r=1; for(let i=2;i<=n;i++) r*=i; return r; };
   const nCr = (n,r)=>{ if(r<0||r>n) return 0; r=Math.min(r,n-r); let num=1,den=1; for(let i=1;i<=r;i++){ num*= (n-r+i); den*=i; } return Math.round(num/den); };
@@ -376,6 +391,51 @@
     const {choices:chC, correctIndex:ciC} = finalizeChoices([d1,d2,d3,d4], correct, 5);
     return {skill:"probability", type:"mcq", prompt, choices:chC, correctIndex:ciC, hint:`Use $\\binom{n}{k}$.`, explain:`$\\binom{${n}}{${k}} = ${correct}$.`};
   }
+
+  function genHypergeometric(){
+    const red = rng(3,7);
+    const blue = rng(3,7);
+    const total = red + blue;
+    const draw = choice([2,3]);
+    const k = rng(0, Math.min(draw, red));
+    const favorable = nCr(red, k) * nCr(blue, draw-k);
+    const all = nCr(total, draw);
+    const rf = reduceFrac(favorable, all);
+    const correct = toFracStr(rf);
+    const prompt = `An urn has ${red} red and ${blue} blue balls. If ${draw} are drawn without replacement, what is $P(\text{exactly }${k}\text{ red})$?`;
+    const d1 = fracStr(nCr(red, k), nCr(total, draw));
+    const d2 = fracStr(nCr(red, k) * nCr(blue, draw-k), total**draw);
+    const d3 = fracStr(nCr(red, Math.max(0,k-1)) * nCr(blue, draw-Math.max(0,k-1)), all);
+    const d4 = fracStr(nCr(total, k), all);
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"probability", type:"mcq", prompt, choices, correctIndex, hint:`Use hypergeometric: $\dfrac{\binom{R}{k}\binom{B}{n-k}}{\binom{R+B}{n}}$.`, explain:`$P=\dfrac{\binom{${red}}{${k}}\binom{${blue}}{${draw-k}}}{\binom{${total}}{${draw}}}=${correct}$.`};
+  }
+
+  function genVarianceBernoulli(){
+    const pNum = choice([1,2,3,4]);
+    const pDen = choice([5,6,8,10]);
+    const pFrac = reduceFrac(pNum, pDen);
+    const qFrac = reduceFrac(pFrac.d - pFrac.n, pFrac.d);
+    const varF = mulFrac(pFrac.n,pFrac.d,qFrac.n,qFrac.d);
+    const correct = toFracStr(varF);
+    const prompt = `For a Bernoulli random variable with $P(X=1)=${toFracStr(pFrac)}$, compute $\operatorname{Var}(X)$.`;
+    const d1 = toFracStr(pFrac);
+    const d2 = toFracStr(qFrac);
+    const d3 = toFracStr(addFrac(varF.n,varF.d,1,10));
+    const d4 = toFracStr(mulFrac(pFrac.n,pFrac.d,pFrac.n,pFrac.d));
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"probability", type:"mcq", prompt, choices, correctIndex, hint:`Bernoulli variance is $p(1-p)$.`, explain:`$\operatorname{Var}(X)=p(1-p)=${toFracStr(pFrac)}(1-${toFracStr(pFrac)})=${correct}$.`};
+  }
+
+  function genNormalRule(){
+    const z = choice([1,2]);
+    const correct = z===1 ? '0.68' : '0.95';
+    const prompt = `Using the 68-95-99.7 rule, approximately what is $P(|Z|\le ${z})$ for $Z\sim\mathcal N(0,1)$?`;
+    const distractors = z===1 ? ['0.95','0.50','0.32','0.84'] : ['0.68','0.997','0.75','0.90'];
+    const {choices, correctIndex} = finalizeChoices(distractors, correct, 5);
+    return {skill:"probability", type:"mcq", prompt, choices, correctIndex, hint:`Empirical rule: 1σ≈68%, 2σ≈95%, 3σ≈99.7%.`, explain:`For ±${z}σ, the rule gives about ${correct}.`};
+  }
+
   function genIntegralTrig(){
     const k = rng(1,5) * (Math.random()<0.2?-1:1);
     const m = rng(-3,3);
@@ -495,6 +555,40 @@
     const explain = `$=${v.map((vi,i)=>`${vi}\\cdot${w[i]}`).join(' + ')} = ${correct}$.`;
     return {skill:"linalg", type:"mcq", prompt, choices, correctIndex, hint, explain};
   }
+
+  function genLA_Inverse2(){
+    let a=rng(-4,4), b=rng(-4,4), c=rng(-4,4), d=rng(-4,4);
+    let det = a*d - b*c;
+    let guard=0;
+    while ((det===0 || Math.abs(det)>8) && guard++<20){
+      a=rng(-4,4); b=rng(-4,4); c=rng(-4,4); d=rng(-4,4);
+      det = a*d - b*c;
+    }
+    if (det===0) det = 1;
+    const M = mat2(a,b,c,d);
+    const correct = `${fracStr(1,det)}${matToLatex([[d,-b],[-c,a]])}`;
+    const d1 = `${fracStr(1,det)}${matToLatex([[a,-b],[-c,d]])}`;
+    const d2 = `${fracStr(1,det)}${matToLatex([[d,b],[c,a]])}`;
+    const d3 = `${fracStr(1,Math.max(1,Math.abs(det)+1))}${matToLatex([[d,-b],[-c,a]])}`;
+    const d4 = `${fracStr(1,det)}${matToLatex([[a,c],[b,d]])}`;
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"linalg", type:"mcq", prompt:`For $A=${matToLatex(M)}$, choose $A^{-1}$.`, choices, correctIndex, hint:`$A^{-1}=\frac{1}{ad-bc}\begin{bmatrix}d&-b\\-c&a\end{bmatrix}$.`, explain:`$\det(A)=${det}$, so invert by swap/negate pattern.`};
+  }
+
+  function genLA_EigenDiagonal(){
+    const a = rng(-5,6);
+    let d = rng(-5,6);
+    if (d===a) d += 2;
+    const M = [[a,0],[0,d]];
+    const correct = `{${a}, ${d}}`;
+    const d1 = `{${a+d}, ${a*d}}`;
+    const d2 = `{${a}, ${a}}`;
+    const d3 = `{${d}, ${d}}`;
+    const d4 = `{${Math.abs(a)}, ${Math.abs(d)}}`;
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"linalg", type:"mcq", prompt:`What are the eigenvalues of $${matToLatex(M)}$?`, choices, correctIndex, hint:`For diagonal matrices, eigenvalues are diagonal entries.`, explain:`The diagonal entries are ${a} and ${d}.`};
+  }
+
   function genLimit(){
     const x0 = rng(-5,5);
     const prompt = `Compute \\( \\lim_{h\\to 0} \\dfrac{( ${x0}+h )^2 - (${x0})^2}{h} \\).`;
@@ -522,14 +616,19 @@
       genExpectedDie,
       genChoose,
       genBayesLikelihoods,
-      genBayesGivenB
+      genBayesGivenB,
+      genHypergeometric,
+      genVarianceBernoulli,
+      genNormalRule
     ])();
     if (skill==="linalg") return choice([
       genLA_Mat2Vec2,
       genLA_Det2,
       genLA_Mat2Mat2,
       genLA_Trace,
-      genLA_Dot
+      genLA_Dot,
+      genLA_Inverse2,
+      genLA_EigenDiagonal
     ])();
     return choice([
       genArithmetic,
@@ -547,11 +646,18 @@
       genIndependence,
       genExpectedDie,
       genChoose,
+      genBayesLikelihoods,
+      genBayesGivenB,
+      genHypergeometric,
+      genVarianceBernoulli,
+      genNormalRule,
       genLA_Mat2Vec2,
       genLA_Det2,
       genLA_Mat2Mat2,
       genLA_Trace,
-      genLA_Dot
+      genLA_Dot,
+      genLA_Inverse2,
+      genLA_EigenDiagonal
     ])();
   }
 
