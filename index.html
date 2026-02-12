@@ -155,7 +155,14 @@
       <div class="logo" aria-hidden="true"></div>
       <h1 style="position:relative; z-index:11">Algebra Sprint</h1>
     </div>
-    
+    <div class="controls">
+      <label for="lengthSelect" class="pill" style="font-size:12px">Sprint size</label>
+      <select id="lengthSelect" class="secondary" style="padding:10px 12px; border-radius:12px; border:none; background:var(--card); color:var(--ink)">
+        <option value="10" selected>10 questions</option>
+        <option value="15">15 questions</option>
+        <option value="20">20 questions</option>
+      </select>
+    </div>
   </header>
 
   <main>
@@ -208,6 +215,7 @@
         <div class="row topbar">
           <div class="pill" id="skillTag">Skill</div>
           <div class="pill" id="progressTag">0 / 10</div>
+          <div class="pill" id="statsTag">Streak 0 • Acc 100%</div>
           <button class="secondary" id="homeBtn" style="margin-left:auto">Home</button>
         </div>
         <p class="prompt" id="prompt">Prompt goes here</p>

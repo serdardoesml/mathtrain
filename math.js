@@ -46,14 +46,29 @@
   }
   // Ensure 5 unique choices including the correct answer
   function finalizeChoices(candidates, correct, need=5){
-    const set = new Set();
-    if (correct!=null) set.add(String(correct));
-    (candidates||[]).forEach(x=>{ if (x!=null){ const s=String(x); if(!set.has(s)) set.add(s); } });
+    const correctStr = String(correct);
+    const unique = [];
+    const seen = new Set([correctStr]);
+    (candidates||[]).forEach(x=>{
+      if (x==null) return;
+      const s = String(x);
+      if (!seen.has(s)){
+        seen.add(s);
+        unique.push(s);
+      }
+    });
     const fillers = ['0','1','2','3','4','-1','\\frac{1}{2}','\\frac{2}{3}','e'];
-    for (const f of fillers){ if (set.size>=need) break; if (!set.has(f)) set.add(f); }
-    const arr = shuffle(Array.from(set));
-    const choices = arr.slice(0, need);
-    return { choices, correctIndex: choices.indexOf(String(correct)) };
+    for (const f of fillers){
+      if (unique.length >= need-1) break;
+      if (!seen.has(f)){
+        seen.add(f);
+        unique.push(f);
+      }
+    }
+    const distractors = shuffle(unique).slice(0, Math.max(0, need-1));
+    const insertAt = rng(0, distractors.length);
+    const choices = distractors.slice(0, insertAt).concat([correctStr], distractors.slice(insertAt));
+    return { choices, correctIndex: insertAt };
   }
   const fact = (n)=>{ let r=1; for(let i=2;i<=n;i++) r*=i; return r; };
   const nCr = (n,r)=>{ if(r<0||r>n) return 0; r=Math.min(r,n-r); let num=1,den=1; for(let i=1;i<=r;i++){ num*= (n-r+i); den*=i; } return Math.round(num/den); };
@@ -376,6 +391,226 @@
     const {choices:chC, correctIndex:ciC} = finalizeChoices([d1,d2,d3,d4], correct, 5);
     return {skill:"probability", type:"mcq", prompt, choices:chC, correctIndex:ciC, hint:`Use $\\binom{n}{k}$.`, explain:`$\\binom{${n}}{${k}} = ${correct}$.`};
   }
+
+  function genHypergeometric(){
+    const red = rng(3,7);
+    const blue = rng(3,7);
+    const total = red + blue;
+    const draw = choice([2,3]);
+    const k = rng(0, Math.min(draw, red));
+    const favorable = nCr(red, k) * nCr(blue, draw-k);
+    const all = nCr(total, draw);
+    const rf = reduceFrac(favorable, all);
+    const correct = toFracStr(rf);
+    const prompt = `An urn has ${red} red and ${blue} blue balls. If ${draw} are drawn without replacement, what is $P(\\text{exactly }${k}\\text{ red})$?`;
+    const d1 = fracStr(nCr(red, k), nCr(total, draw));
+    const d2 = fracStr(nCr(red, k) * nCr(blue, draw-k), total**draw);
+    const d3 = fracStr(nCr(red, Math.max(0,k-1)) * nCr(blue, draw-Math.max(0,k-1)), all);
+    const d4 = fracStr(nCr(total, k), all);
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"probability", type:"mcq", prompt, choices, correctIndex, hint:`Use hypergeometric: $\\dfrac{\\binom{R}{k}\\binom{B}{n-k}}{\\binom{R+B}{n}}$.`, explain:`$P=\\dfrac{\\binom{${red}}{${k}}\\binom{${blue}}{${draw-k}}}{\\binom{${total}}{${draw}}}=${correct}$.`};
+  }
+
+  function genVarianceBernoulli(){
+    const pNum = choice([1,2,3,4]);
+    const pDen = choice([5,6,8,10]);
+    const pFrac = reduceFrac(pNum, pDen);
+    const qFrac = reduceFrac(pFrac.d - pFrac.n, pFrac.d);
+    const varF = mulFrac(pFrac.n,pFrac.d,qFrac.n,qFrac.d);
+    const correct = toFracStr(varF);
+    const prompt = `For a Bernoulli random variable with $P(X=1)=${toFracStr(pFrac)}$, compute $\operatorname{Var}(X)$.`;
+    const d1 = toFracStr(pFrac);
+    const d2 = toFracStr(qFrac);
+    const d3 = toFracStr(addFrac(varF.n,varF.d,1,10));
+    const d4 = toFracStr(mulFrac(pFrac.n,pFrac.d,pFrac.n,pFrac.d));
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"probability", type:"mcq", prompt, choices, correctIndex, hint:`Bernoulli variance is $p(1-p)$.`, explain:`$\operatorname{Var}(X)=p(1-p)=${toFracStr(pFrac)}(1-${toFracStr(pFrac)})=${correct}$.`};
+  }
+
+  function genNormalRule(){
+    const z = choice([1,2]);
+    const correct = z===1 ? '0.68' : '0.95';
+    const prompt = `Using the 68-95-99.7 rule, approximately what is $P(|Z|\\le ${z})$ for $Z\\sim\\mathcal N(0,1)$?`;
+    const distractors = z===1 ? ['0.95','0.50','0.32','0.84'] : ['0.68','0.997','0.75','0.90'];
+    const {choices, correctIndex} = finalizeChoices(distractors, correct, 5);
+    return {skill:"probability", type:"mcq", prompt, choices, correctIndex, hint:`Empirical rule: 1σ≈68%, 2σ≈95%, 3σ≈99.7%.`, explain:`For ±${z}σ, the rule gives about ${correct}.`};
+  }
+
+  function genConditionalTable(){
+    const males = rng(18,30);
+    const females = rng(18,30);
+    const mLike = rng(6, males-4);
+    const fLike = rng(6, females-4);
+    const like = mLike + fLike;
+    const total = males + females;
+    const correct = fracStr(mLike, like);
+    const d1 = fracStr(mLike, males);   // P(like|male)
+    const d2 = fracStr(mLike, total);   // joint / total
+    const d3 = fracStr(like, total);    // P(like)
+    const d4 = fracStr(males, total);   // P(male)
+    const prompt = `In a survey, ${mLike} of ${males} men and ${fLike} of ${females} women prefer Model A. If one person is chosen uniformly from those who prefer Model A, what is $P(\\text{male}\\mid\\text{prefers A})$?`;
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"probability", type:"mcq", prompt, choices, correctIndex, hint:`Condition on the subgroup who prefer A.`, explain:`Among A-likers, ${mLike} are male out of ${like}, so probability is ${correct}.`};
+  }
+
+  function genCovarianceBinary(){
+    const pX = reduceFrac(choice([1,2,3]), 4);
+    const pY = reduceFrac(choice([1,2,3]), 4);
+    const p11NumMin = Math.max(0, pX.n*pY.d + pY.n*pX.d - pX.d*pY.d);
+    const p11NumMax = Math.min(pX.n*pY.d, pY.n*pX.d);
+    const den = pX.d * pY.d;
+    const candidates = [];
+    for (let n=Math.max(0,p11NumMin); n<=p11NumMax; n++) candidates.push(reduceFrac(n, den));
+    const p11 = choice(candidates);
+    const exy = p11;
+    const exey = mulFrac(pX.n,pX.d,pY.n,pY.d);
+    const cov = subFrac(exy.n,exy.d,exey.n,exey.d);
+    const correct = toFracStr(cov);
+    const d1 = toFracStr(exy);
+    const d2 = toFracStr(exey);
+    const d3 = toFracStr(addFrac(cov.n,cov.d,1,4));
+    const d4 = toFracStr(subFrac(exey.n,exey.d,exy.n,exy.d));
+    const prompt = `Let $X,Y\\in\\{0,1\\}$ with $P(X=1)=${toFracStr(pX)}$, $P(Y=1)=${toFracStr(pY)}$, and $P(X=1,Y=1)=${toFracStr(p11)}$. Compute $\\operatorname{Cov}(X,Y)$.`;
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"probability", type:"mcq", prompt, choices, correctIndex, hint:`$\\operatorname{Cov}(X,Y)=E[XY]-E[X]E[Y]$.`, explain:`$E[XY]=P(X=1,Y=1)=${toFracStr(p11)}$, so covariance is ${correct}.`};
+  }
+
+  function genPortfolioVariance(){
+    const s1 = choice([1,2,3]);
+    const s2 = choice([1,2,3]);
+    const rho = choice([-1,0,1]);
+    const prompt = `Two returns have standard deviations ${s1} and ${s2}, correlation $\\rho=${rho}$, and equal weights $(1/2,1/2)$. Compute portfolio variance.`;
+    const v = 0.25*(s1*s1 + s2*s2 + 2*rho*s1*s2);
+    const correct = fmt(v);
+    const d1 = fmt(0.25*(s1*s1 + s2*s2));
+    const d2 = fmt(0.5*(s1+s2));
+    const d3 = fmt(0.25*(s1+s2)*(s1+s2));
+    const d4 = fmt(0.5*(s1*s1+s2*s2));
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"probability", type:"mcq", prompt, choices, correctIndex, hint:`$\\mathrm{Var}(w_1R_1+w_2R_2)=w_1^2\\sigma_1^2+w_2^2\\sigma_2^2+2w_1w_2\\rho\\sigma_1\\sigma_2$.`, explain:`With $w_1=w_2=1/2$, variance is ${correct}.`};
+  }
+
+  function genSystem2x2(){
+    let x = rng(-4,4), y = rng(-4,4);
+    const a = rng(-5,5) || 2, b = rng(-5,5) || -1;
+    let c = rng(-5,5) || 1, d = rng(-5,5) || 3;
+    let det = a*d - b*c;
+    let guard = 0;
+    while ((det===0 || Math.abs(det)>16) && guard++<20){
+      c = rng(-5,5) || 1;
+      d = rng(-5,5) || 3;
+      det = a*d - b*c;
+    }
+    const e = a*x + b*y;
+    const f = c*x + d*y;
+    const prompt = `Solve the system: $${a}x ${b>=0?'+':'-'} ${Math.abs(b)}y = ${e}$ and $${c}x ${d>=0?'+':'-'} ${Math.abs(d)}y = ${f}$.`;
+    const correct = `(${x}, ${y})`;
+    const d1 = `(${y}, ${x})`;
+    const d2 = `(${x+1}, ${y})`;
+    const d3 = `(${x}, ${y-1})`;
+    const d4 = `(${fmt(e/a)}, ${fmt(f/d)})`;
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"algebra", type:"mcq", prompt, choices, correctIndex, hint:`Eliminate one variable or use substitution.`, explain:`The pair $(x,y)=(${x},${y})$ satisfies both equations.`};
+  }
+
+  function genLogDerivativePoint(){
+    const a = choice([1,2,3,4]);
+    const b = rng(1,6);
+    const x0 = rng(1,5);
+    const inside = a*x0 + b;
+    const correctVal = a/inside;
+    const prompt = `Compute $f'(${x0})$ for $f(x)=\\ln(${a}x + ${b})$.`;
+    const {choices, correctIndex} = buildNumericMCQ(correctVal);
+    return {skill:"calculus", type:"mcq", prompt, choices, correctIndex, hint:`$\\frac{d}{dx}\\ln(u)=u'/u$.`, explain:`$f'(${x0})=\\dfrac{${a}}{${a* x0 + b}}=${fmt(correctVal)}$.`};
+  }
+
+  function genPartialDerivativePoint(){
+    const a = rng(1,4), b = rng(-4,4), c = rng(1,4);
+    const x0 = rng(-2,3), y0 = rng(-2,3);
+    const prompt = `For $f(x,y)=${a}x^2 ${b>=0?'+':'-'} ${Math.abs(b)}xy + ${c}y^2$, compute $\\partial f/\\partial x$ at $(${x0},${y0})$.`;
+    const ans = 2*a*x0 + b*y0;
+    const {choices, correctIndex} = buildNumericMCQ(ans);
+    const explain = `$f_x=2(${a})x ${b>=0?'+':'-'} ${Math.abs(b)}y$, so at $(${x0},${y0})$ it is ${fmt(ans)}.`;
+    return {skill:"calculus", type:"mcq", prompt, choices, correctIndex, hint:`Treat $y$ as constant for $\\partial/\\partial x$.`, explain};
+  }
+
+  function genSecondDerivativePoint(){
+    const a = rng(1,4), b = rng(1,4), x0 = rng(-3,3);
+    const prompt = `For $f(x)=${a}x^3 ${b>=0?'+':'-'} ${Math.abs(b)}x^2$, compute $f''(${x0})$.`;
+    const ans = 6*a*x0 + 2*b;
+    const {choices, correctIndex} = buildNumericMCQ(ans);
+    return {skill:"calculus", type:"mcq", prompt, choices, correctIndex, hint:`Differentiate twice: $x^3\\to 3x^2\\to 6x$.`, explain:`$f''(x)=${6*a}x + ${2*b}$, so $f''(${x0})=${fmt(ans)}$.`};
+  }
+
+  function genLA_SolveLinearSystem(){
+    let x = rng(-4,4), y = rng(-4,4);
+    const A = mat2(rng(-4,4)||2, rng(-4,4), rng(-4,4), rng(-4,4)||1);
+    let det = det2(A);
+    let guard = 0;
+    while (det===0 && guard++<20){
+      A[0][0] = rng(-4,4)||2;
+      A[0][1] = rng(-4,4);
+      A[1][0] = rng(-4,4);
+      A[1][1] = rng(-4,4)||1;
+      det = det2(A);
+    }
+    const b = mat2MulVec2(A, [x,y]);
+    const correct = vecToLatex([x,y]);
+    const d1 = vecToLatex([y,x]);
+    const d2 = vecToLatex([x+1,y]);
+    const d3 = vecToLatex([x,y-1]);
+    const d4 = vecToLatex([b[0], b[1]]);
+    const prompt = `Solve for $x$: \\[ ${matToLatex(A)}x = ${vecToLatex(b)} \\]`;
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"linalg", type:"mcq", prompt, choices, correctIndex, hint:`You can solve by elimination or compute $A^{-1}b$.`, explain:`Substituting ${correct} satisfies both equations.`};
+  }
+
+  function genLA_Rank2(){
+    const M = mat2(rng(-3,3), rng(-3,3), rng(-3,3), rng(-3,3));
+    const d = det2(M);
+    const correct = d===0 ? '1' : '2';
+    const d1 = d===0 ? '2' : '1';
+    const d2 = '0';
+    const d3 = '3';
+    const d4 = '4';
+    const prompt = `What is the rank of $${matToLatex(M)}$?`;
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"linalg", type:"mcq", prompt, choices, correctIndex, hint:`For 2x2 matrices: rank is 2 iff determinant is nonzero.`, explain:`$\\det=${fmt(d)}$, so rank is ${correct}.`};
+  }
+
+  function genLA_ProjectionCoeff(){
+    const v = [choice([1,2,3]), choice([1,2,3])];
+    const k = choice([-3,-2,-1,1,2,3]);
+    const ortho = [v[1], -v[0]];
+    const u = [k*v[0] + ortho[0], k*v[1] + ortho[1]];
+    const dotuv = u[0]*v[0] + u[1]*v[1];
+    const dotvv = v[0]*v[0] + v[1]*v[1];
+    const coeff = fracStr(dotuv, dotvv);
+    const prompt = `Compute the projection coefficient of $u$ onto $v$: $\\dfrac{u\\cdot v}{v\\cdot v}$ for $u=${vecToLatex(u)}, v=${vecToLatex(v)}$.`;
+    const d1 = fracStr(dotuv, 1);
+    const d2 = fracStr(dotvv, dotuv || 1);
+    const d3 = fracStr(k+1,1);
+    const d4 = fracStr(-k,1);
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], coeff, 5);
+    return {skill:"linalg", type:"mcq", prompt, choices, correctIndex, hint:`Use $\\alpha=(u\\cdot v)/(v\\cdot v)$.`, explain:`$u\\cdot v=${dotuv},\\; v\\cdot v=${dotvv}$ so coefficient is ${coeff}.`};
+  }
+
+  function genExpEquation(){
+    const base = choice([2,3]);
+    const m = choice([1,2]);
+    const c = rng(-3,4);
+    const x = rng(-2,4);
+    const rhsPow = m*x + c;
+    const prompt = `Solve for $x$: $${base}^{${m}x + ${c}} = ${base}^{${rhsPow}}$.`;
+    const correct = fmt(x);
+    const d1 = fmt(rhsPow);
+    const d2 = fmt(x+1);
+    const d3 = fmt((rhsPow-c)/(m+1));
+    const d4 = fmt(-x);
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"algebra", type:"mcq", prompt, choices, correctIndex, hint:`Equal bases imply equal exponents.`, explain:`${m}x+${c}=${rhsPow} gives $x=${correct}$.`};
+  }
+
   function genIntegralTrig(){
     const k = rng(1,5) * (Math.random()<0.2?-1:1);
     const m = rng(-3,3);
@@ -495,6 +730,40 @@
     const explain = `$=${v.map((vi,i)=>`${vi}\\cdot${w[i]}`).join(' + ')} = ${correct}$.`;
     return {skill:"linalg", type:"mcq", prompt, choices, correctIndex, hint, explain};
   }
+
+  function genLA_Inverse2(){
+    let a=rng(-4,4), b=rng(-4,4), c=rng(-4,4), d=rng(-4,4);
+    let det = a*d - b*c;
+    let guard=0;
+    while ((det===0 || Math.abs(det)>8) && guard++<20){
+      a=rng(-4,4); b=rng(-4,4); c=rng(-4,4); d=rng(-4,4);
+      det = a*d - b*c;
+    }
+    if (det===0) det = 1;
+    const M = mat2(a,b,c,d);
+    const correct = `${fracStr(1,det)}${matToLatex([[d,-b],[-c,a]])}`;
+    const d1 = `${fracStr(1,det)}${matToLatex([[a,-b],[-c,d]])}`;
+    const d2 = `${fracStr(1,det)}${matToLatex([[d,b],[c,a]])}`;
+    const d3 = `${fracStr(1,Math.max(1,Math.abs(det)+1))}${matToLatex([[d,-b],[-c,a]])}`;
+    const d4 = `${fracStr(1,det)}${matToLatex([[a,c],[b,d]])}`;
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"linalg", type:"mcq", prompt:`For $A=${matToLatex(M)}$, choose $A^{-1}$.`, choices, correctIndex, hint:`$A^{-1}=\\frac{1}{ad-bc}\\begin{bmatrix}d&-b\\\\-c&a\\end{bmatrix}$.`, explain:`$\\det(A)=${det}$, so invert by swap/negate pattern.`};
+  }
+
+  function genLA_EigenDiagonal(){
+    const a = rng(-5,6);
+    let d = rng(-5,6);
+    if (d===a) d += 2;
+    const M = [[a,0],[0,d]];
+    const correct = `{${a}, ${d}}`;
+    const d1 = `{${a+d}, ${a*d}}`;
+    const d2 = `{${a}, ${a}}`;
+    const d3 = `{${d}, ${d}}`;
+    const d4 = `{${Math.abs(a)}, ${Math.abs(d)}}`;
+    const {choices, correctIndex} = finalizeChoices([d1,d2,d3,d4], correct, 5);
+    return {skill:"linalg", type:"mcq", prompt:`What are the eigenvalues of $${matToLatex(M)}$?`, choices, correctIndex, hint:`For diagonal matrices, eigenvalues are diagonal entries.`, explain:`The diagonal entries are ${a} and ${d}.`};
+  }
+
   function genLimit(){
     const x0 = rng(-5,5);
     const prompt = `Compute \\( \\lim_{h\\to 0} \\dfrac{( ${x0}+h )^2 - (${x0})^2}{h} \\).`;
@@ -506,14 +775,17 @@
   }
   function makeProblem(skill){
     if (skill==="arithmetic") return choice([genArithmetic, genArithmetic, genArithmetic])();
-    if (skill==="algebra")   return choice([genLinear, genExpand, genFactor])();
+    if (skill==="algebra")   return choice([genLinear, genExpand, genFactor, genSystem2x2, genExpEquation])();
     if (skill==="calculus")  return choice([
       genDerivativePoint,
       genLimit,
       genIntegralPoly,
       genIntegralTrig,
       genIntegralExp,
-      genDefiniteIntegralPoly
+      genDefiniteIntegralPoly,
+      genLogDerivativePoint,
+      genPartialDerivativePoint,
+      genSecondDerivativePoint
     ])();
     if (skill==="probability") return choice([
       genCoinBinom,
@@ -522,36 +794,65 @@
       genExpectedDie,
       genChoose,
       genBayesLikelihoods,
-      genBayesGivenB
+      genBayesGivenB,
+      genHypergeometric,
+      genVarianceBernoulli,
+      genNormalRule,
+      genConditionalTable,
+      genCovarianceBinary,
+      genPortfolioVariance
     ])();
     if (skill==="linalg") return choice([
       genLA_Mat2Vec2,
       genLA_Det2,
       genLA_Mat2Mat2,
       genLA_Trace,
-      genLA_Dot
+      genLA_Dot,
+      genLA_Inverse2,
+      genLA_EigenDiagonal,
+      genLA_SolveLinearSystem,
+      genLA_Rank2,
+      genLA_ProjectionCoeff
     ])();
     return choice([
       genArithmetic,
       genLinear,
       genExpand,
       genFactor,
+      genSystem2x2,
+      genExpEquation,
       genDerivativePoint,
       genLimit,
       genIntegralPoly,
       genIntegralTrig,
       genIntegralExp,
       genDefiniteIntegralPoly,
+      genLogDerivativePoint,
+      genPartialDerivativePoint,
+      genSecondDerivativePoint,
       genCoinBinom,
       genTwoDiceSum,
       genIndependence,
       genExpectedDie,
       genChoose,
+      genBayesLikelihoods,
+      genBayesGivenB,
+      genHypergeometric,
+      genVarianceBernoulli,
+      genNormalRule,
+      genConditionalTable,
+      genCovarianceBinary,
+      genPortfolioVariance,
       genLA_Mat2Vec2,
       genLA_Det2,
       genLA_Mat2Mat2,
       genLA_Trace,
-      genLA_Dot
+      genLA_Dot,
+      genLA_Inverse2,
+      genLA_EigenDiagonal,
+      genLA_SolveLinearSystem,
+      genLA_Rank2,
+      genLA_ProjectionCoeff
     ])();
   }
 
